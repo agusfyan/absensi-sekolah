@@ -214,7 +214,7 @@
     <script>
         let currentUser = null;
         let currentRole = null;
-        const API_URL = 'https://script.google.com/macros/s/AKfycbz3dok1W6O8Z__Ow_eVNNf4NrOGJ80SUF9viN2StZWhr6j0s-HBGLhbeT7FACztL8o6/exec';
+        const API_URL = 'https://script.google.com/macros/s/AKfycbwiJip2pVyE4kCqL1KC1pT46sxoMtTiSPPGZ1nA0Dhi3z3vXS8EyevIJe_NRriRoVkI/exec';
 
         // Data user sistem (default)
         let userData = {
@@ -406,26 +406,29 @@
             // Update tanggal di semua dashboard
             updateDashboardDate();
             
-            if (role === 'admin') {
-                document.getElementById('adminDashboard').classList.remove('hidden');
-                showDataAbsensi();
-            } else if (role === 'guru') {
-                document.getElementById('guruDashboard').classList.remove('hidden');
-                
-                // Cari nama user yang sedang login
-                let userName = `Guru Kelas ${kelas}`;
-                if (userData.guru[currentUser]) {
-                    userName = userData.guru[currentUser].name;
-                } else if (userData.waliKelas[currentUser]) {
-                    userName = userData.waliKelas[currentUser].name;
+            // Load data sistem terbaru dari server saat login
+            loadSystemDataFromServer().then(() => {
+                if (role === 'admin') {
+                    document.getElementById('adminDashboard').classList.remove('hidden');
+                    showDataAbsensi();
+                } else if (role === 'guru') {
+                    document.getElementById('guruDashboard').classList.remove('hidden');
+                    
+                    // Cari nama user yang sedang login (dengan data terbaru)
+                    let userName = `Guru Kelas ${kelas}`;
+                    if (userData.guru[currentUser]) {
+                        userName = userData.guru[currentUser].name;
+                    } else if (userData.waliKelas[currentUser]) {
+                        userName = userData.waliKelas[currentUser].name;
+                    }
+                    
+                    document.getElementById('guruName').textContent = userName;
+                    showAbsensiFormGuru(kelas);
+                } else if (role === 'guest') {
+                    document.getElementById('guestDashboard').classList.remove('hidden');
+                    showDataAbsensiGuest();
                 }
-                
-                document.getElementById('guruName').textContent = userName;
-                showAbsensiFormGuru(kelas);
-            } else if (role === 'guest') {
-                document.getElementById('guestDashboard').classList.remove('hidden');
-                showDataAbsensiGuest();
-            }
+            });
         }
 
         function updateDashboardDate() {
@@ -1831,10 +1834,128 @@
             try {
                 localStorage.setItem('userData', JSON.stringify(userData));
                 console.log('Data user berhasil disimpan');
+                
+                // Sinkronkan ke Google Sheets
+                syncSystemDataToServer();
             } catch (error) {
                 console.error('Error saving user data:', error);
                 alert('❌ Gagal menyimpan data user. Storage mungkin penuh.');
             }
+        }
+
+        // Fungsi untuk sinkronisasi data sistem ke server
+        function syncSystemDataToServer() {
+            // Simpan data sistem ke sheet "SystemData" di Google Sheets
+            const systemData = {
+                action: 'saveSystemData',
+                userData: userData,
+                siswaData: siswaData,
+                timestamp: new Date().toISOString()
+            };
+
+            fetch(API_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(systemData)
+            })
+            .then(() => {
+                console.log('✅ Data sistem berhasil disinkron ke server');
+                
+                // Tampilkan notifikasi sukses
+                showSyncNotification('✅ Data sistem tersinkron ke Google Sheets');
+            })
+            .catch(error => {
+                console.error('❌ Gagal sinkron data sistem:', error);
+                showSyncNotification('⚠️ Gagal sinkron ke server, data tersimpan lokal');
+            });
+        }
+
+        // Fungsi untuk memuat data sistem dari server
+        function loadSystemDataFromServer() {
+            return new Promise((resolve) => {
+                // Coba ambil data dari sheet "SystemData"
+                fetch(API_URL + '?action=getSystemData&t=' + Date.now())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(serverData => {
+                    let dataLoaded = false;
+                    
+                    if (serverData && serverData.userData) {
+                        // Merge data user dari server dengan prioritas server
+                        const mergedUserData = { ...userData };
+                        
+                        // Update admin data jika ada
+                        if (serverData.userData.admin) {
+                            mergedUserData.admin = { ...mergedUserData.admin, ...serverData.userData.admin };
+                        }
+                        
+                        // Update guru data jika ada
+                        if (serverData.userData.guru) {
+                            mergedUserData.guru = { ...mergedUserData.guru, ...serverData.userData.guru };
+                        }
+                        
+                        // Update wali kelas data jika ada
+                        if (serverData.userData.waliKelas) {
+                            mergedUserData.waliKelas = { ...mergedUserData.waliKelas, ...serverData.userData.waliKelas };
+                        }
+                        
+                        userData = mergedUserData;
+                        localStorage.setItem('userData', JSON.stringify(userData));
+                        console.log('✅ Data user dimuat dari server');
+                        dataLoaded = true;
+                    }
+                    
+                    if (serverData && serverData.siswaData) {
+                        // Merge data siswa dari server
+                        Object.keys(serverData.siswaData).forEach(kelas => {
+                            if (serverData.siswaData[kelas] && Array.isArray(serverData.siswaData[kelas])) {
+                                siswaData[kelas] = serverData.siswaData[kelas];
+                            }
+                        });
+                        localStorage.setItem('siswaData', JSON.stringify(siswaData));
+                        console.log('✅ Data siswa dimuat dari server');
+                        dataLoaded = true;
+                    }
+                    
+                    resolve(dataLoaded);
+                })
+                .catch(error => {
+                    console.error('Error loading system data from server:', error);
+                    // Jika gagal, coba dengan metode fallback
+                    resolve(false);
+                });
+            });
+        }
+
+        // Fungsi untuk menampilkan notifikasi sinkronisasi
+        function showSyncNotification(message) {
+            // Hapus notifikasi lama jika ada
+            const oldNotif = document.getElementById('syncNotification');
+            if (oldNotif) {
+                oldNotif.remove();
+            }
+            
+            // Buat notifikasi baru
+            const notification = document.createElement('div');
+            notification.id = 'syncNotification';
+            notification.className = 'fixed top-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg z-50 shadow-lg';
+            notification.textContent = message;
+            
+            document.body.appendChild(notification);
+            
+            // Hapus notifikasi setelah 3 detik
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 3000);
         }
 
         function loadUserData() {
@@ -1950,6 +2071,9 @@
                                 <button onclick="testConnection()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">
                                     Test Koneksi
                                 </button>
+                                <button onclick="manualSyncSystemData()" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg text-sm">
+                                    🔄 Sinkron Data Sistem
+                                </button>
                                 <button onclick="testSubmit()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm">
                                     Test Submit Data
                                 </button>
@@ -2049,37 +2173,84 @@
 
         // Fungsi untuk sinkronisasi manual data sistem
         function manualSyncSystemData() {
-            showSyncNotification('🔄 Memulai sinkronisasi data sistem...', 'info');
+            const loadingMsg = document.createElement('div');
+            loadingMsg.id = 'syncLoadingMsg';
+            loadingMsg.className = 'fixed top-4 right-4 bg-orange-600 text-white px-4 py-2 rounded-lg z-50 shadow-lg';
+            loadingMsg.innerHTML = '🔄 Menyinkronkan data sistem...<br><small>Mohon tunggu...</small>';
+            document.body.appendChild(loadingMsg);
             
-            // Sinkronisasi data user dan siswa ke server
-            Promise.all([
-                saveSystemDataToServer('userData', userData),
-                saveSystemDataToServer('siswaData', siswaData)
-            ])
-            .then(results => {
-                const userSyncSuccess = results[0];
-                const siswaSyncSuccess = results[1];
-                
-                if (userSyncSuccess && siswaSyncSuccess) {
-                    showSyncNotification('✅ Semua data sistem berhasil disinkronkan!', 'success');
-                } else if (userSyncSuccess || siswaSyncSuccess) {
-                    showSyncNotification('⚠️ Sebagian data berhasil disinkronkan', 'warning');
-                } else {
-                    showSyncNotification('❌ Gagal menyinkronkan data sistem', 'error');
-                }
+            // Step 1: Upload data sistem ke server
+            console.log('📤 Mengirim data sistem ke Google Sheets...');
+            
+            const systemData = {
+                action: 'saveSystemData',
+                userData: userData,
+                siswaData: siswaData,
+                timestamp: new Date().toISOString()
+            };
+
+            fetch(API_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(systemData)
             })
             .then(() => {
-                // Setelah upload, download data terbaru dari server
-                return loadSystemDataFromServer();
-            })
-            .then(loadSuccess => {
-                if (loadSuccess) {
-                    showSyncNotification('🔄 Data terbaru dimuat dari server', 'success');
+                console.log('✅ Data berhasil dikirim ke server');
+                
+                // Update loading message
+                if (loadingMsg) {
+                    loadingMsg.innerHTML = '📥 Mengambil data terbaru...<br><small>Hampir selesai...</small>';
                 }
+                
+                // Step 2: Download data terbaru dari server
+                setTimeout(() => {
+                    loadSystemDataFromServer().then(success => {
+                        if (loadingMsg) {
+                            loadingMsg.remove();
+                        }
+                        
+                        if (success) {
+                            showSyncNotification('✅ Sinkronisasi berhasil! Data tersinkron antar perangkat');
+                            
+                            // Refresh tampilan jika sedang di user management
+                            if (document.getElementById('userTabContent')) {
+                                const activeTab = document.querySelector('[id^="tab"].border-b-2');
+                                if (activeTab) {
+                                    const tabType = activeTab.id.replace('tab', '').toLowerCase();
+                                    showUserTab(tabType);
+                                }
+                            }
+                            
+                            // Tampilkan dialog sukses dengan detail
+                            setTimeout(() => {
+                                alert('🎉 SINKRONISASI BERHASIL!\n\n✅ Data yang tersinkron:\n• Nama guru dan wali kelas\n• Data siswa per kelas\n• Pengaturan sistem\n\n📱 Sekarang data akan sama di semua perangkat!\n\nCoba login di perangkat lain untuk memastikan.');
+                            }, 500);
+                            
+                        } else {
+                            showSyncNotification('⚠️ Upload berhasil, namun gagal ambil data terbaru');
+                            
+                            setTimeout(() => {
+                                alert('⚠️ SINKRONISASI SEBAGIAN BERHASIL\n\n✅ Data berhasil dikirim ke Google Sheets\n❌ Gagal mengambil data terbaru dari server\n\n💡 Solusi:\n• Coba refresh halaman\n• Atau login ulang\n• Periksa koneksi internet');
+                            }, 500);
+                        }
+                    });
+                }, 2000);
             })
             .catch(error => {
-                console.error('Error during manual sync:', error);
-                showSyncNotification('❌ Terjadi kesalahan saat sinkronisasi', 'error');
+                console.error('❌ Gagal mengirim data:', error);
+                
+                if (loadingMsg) {
+                    loadingMsg.remove();
+                }
+                
+                showSyncNotification('❌ Gagal sinkronisasi - periksa koneksi');
+                
+                setTimeout(() => {
+                    alert('❌ SINKRONISASI GAGAL\n\n🔍 Kemungkinan penyebab:\n• Koneksi internet bermasalah\n• Google Apps Script belum di-update\n• URL Apps Script tidak valid\n\n💡 Solusi:\n• Periksa koneksi internet\n• Pastikan kode Apps Script sudah diperbarui\n• Test koneksi di menu Pengaturan');
+                }, 500);
             });
         }
 
@@ -3059,6 +3230,15 @@
             // Muat data user dari localStorage
             loadUserData();
             
+            // Load data sistem terbaru dari server saat startup
+            setTimeout(() => {
+                loadSystemDataFromServer().then(success => {
+                    if (success) {
+                        console.log('✅ Data sistem terbaru dimuat dari server');
+                    }
+                });
+            }, 1000);
+            
             // Bersihkan data absensi harian yang lama
             cleanupOldAttendanceData();
             
@@ -3076,6 +3256,11 @@
             
             // Mulai auto-sync
             startAutoSync();
+            
+            // Auto-sync data sistem setiap 10 menit
+            setInterval(() => {
+                loadSystemDataFromServer();
+            }, 600000);
             
             // Backup data setiap 5 menit
             setInterval(backupDataToMultipleStorage, 300000);
@@ -3096,5 +3281,5 @@
             }, 2000);
         });
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968c60d2314e4a9c',t:'MTc1NDEyNTE1Ni4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968c973ff21a4a07',t:'MTc1NDEyNzM4Ni4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
