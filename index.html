@@ -1948,8 +1948,12 @@
 
         function saveUserData() {
             try {
+                // Tambahkan timestamp untuk tracking perubahan
+                const timestamp = new Date().toISOString();
                 localStorage.setItem('userData', JSON.stringify(userData));
-                console.log('Data user berhasil disimpan');
+                localStorage.setItem('userDataLastModified', timestamp);
+                localStorage.setItem('userDataNeedsSync', 'true');
+                console.log('Data user berhasil disimpan dengan timestamp:', timestamp);
                 
                 // Sinkronkan ke Google Sheets
                 syncSystemDataToServer();
@@ -1961,12 +1965,16 @@
 
         // Fungsi untuk sinkronisasi data sistem ke server
         function syncSystemDataToServer() {
+            const timestamp = new Date().toISOString();
+            
             // Simpan data sistem ke sheet "SystemData" di Google Sheets
             const systemData = {
                 action: 'saveSystemData',
                 userData: userData,
                 siswaData: siswaData,
-                timestamp: new Date().toISOString()
+                timestamp: timestamp,
+                userDataLastModified: localStorage.getItem('userDataLastModified') || timestamp,
+                siswaDataLastModified: localStorage.getItem('siswaDataLastModified') || timestamp
             };
 
             fetch(API_URL, {
@@ -1980,6 +1988,13 @@
             .then(() => {
                 console.log('✅ Data sistem berhasil disinkron ke server');
                 
+                // Clear sync flags setelah berhasil
+                localStorage.removeItem('userDataNeedsSync');
+                localStorage.removeItem('siswaDataNeedsSync');
+                
+                // Update timestamp sync terakhir
+                localStorage.setItem('lastSystemSync', timestamp);
+                
                 // Tampilkan notifikasi sukses
                 showSyncNotification('✅ Data sistem tersinkron ke Google Sheets');
             })
@@ -1989,10 +2004,14 @@
             });
         }
 
-        // Fungsi untuk memuat data sistem dari server
+        // Fungsi untuk memuat data sistem dari server dengan smart merge
         function loadSystemDataFromServer() {
             return new Promise((resolve) => {
                 console.log('📡 Mengambil data sistem dari Google Sheets...');
+                
+                // Simpan timestamp lokal untuk perbandingan
+                const localModified = localStorage.getItem('siswaDataLastModified');
+                const localUserModified = localStorage.getItem('userDataLastModified');
                 
                 // Coba dengan multiple methods untuk memastikan kompatibilitas
                 const tryFetch = () => {
@@ -2051,73 +2070,107 @@
                     if (serverData && typeof serverData === 'object') {
                         console.log('📦 Data diterima dari server:', Object.keys(serverData));
                         
+                        // Smart merge untuk userData
                         if (serverData.userData) {
-                            // Merge data user dari server dengan prioritas server
-                            const mergedUserData = { ...userData };
+                            const serverUserModified = serverData.timestamp || serverData.userDataLastModified;
                             
-                            // Update admin data jika ada
-                            if (serverData.userData.admin) {
-                                mergedUserData.admin = { ...mergedUserData.admin, ...serverData.userData.admin };
+                            // Hanya update jika data server lebih baru ATAU tidak ada data lokal
+                            if (!localUserModified || (serverUserModified && serverUserModified > localUserModified)) {
+                                console.log('🔄 Updating user data from server (server is newer)');
+                                
+                                const mergedUserData = { ...userData };
+                                
+                                // Update admin data jika ada
+                                if (serverData.userData.admin) {
+                                    mergedUserData.admin = { ...mergedUserData.admin, ...serverData.userData.admin };
+                                }
+                                
+                                // Update guru data jika ada
+                                if (serverData.userData.guru) {
+                                    mergedUserData.guru = { ...mergedUserData.guru, ...serverData.userData.guru };
+                                }
+                                
+                                // Update wali kelas data jika ada
+                                if (serverData.userData.waliKelas) {
+                                    mergedUserData.waliKelas = { ...mergedUserData.waliKelas, ...serverData.userData.waliKelas };
+                                }
+                                
+                                userData = mergedUserData;
+                                localStorage.setItem('userData', JSON.stringify(userData));
+                                localStorage.setItem('userDataLastModified', serverUserModified || new Date().toISOString());
+                                console.log('✅ Data user dimuat dari server');
+                                dataLoaded = true;
+                            } else {
+                                console.log('ℹ️ Local user data is newer, keeping local changes');
                             }
-                            
-                            // Update guru data jika ada
-                            if (serverData.userData.guru) {
-                                mergedUserData.guru = { ...mergedUserData.guru, ...serverData.userData.guru };
-                            }
-                            
-                            // Update wali kelas data jika ada
-                            if (serverData.userData.waliKelas) {
-                                mergedUserData.waliKelas = { ...mergedUserData.waliKelas, ...serverData.userData.waliKelas };
-                            }
-                            
-                            userData = mergedUserData;
-                            localStorage.setItem('userData', JSON.stringify(userData));
-                            console.log('✅ Data user dimuat dari server');
-                            dataLoaded = true;
                         }
                         
+                        // Smart merge untuk siswaData
                         if (serverData.siswaData) {
-                            // Update data siswa dari server dengan prioritas server
-                            let siswaUpdated = false;
-                            let updateDetails = [];
+                            const serverSiswaModified = serverData.timestamp || serverData.siswaDataLastModified;
                             
-                            Object.keys(serverData.siswaData).forEach(kelas => {
-                                if (serverData.siswaData[kelas] && Array.isArray(serverData.siswaData[kelas])) {
-                                    // Cek apakah ada perubahan
-                                    const currentData = JSON.stringify(siswaData[kelas] || []);
-                                    const serverDataStr = JSON.stringify(serverData.siswaData[kelas]);
-                                    
-                                    if (currentData !== serverDataStr) {
-                                        const oldCount = siswaData[kelas] ? siswaData[kelas].length : 0;
-                                        const newCount = serverData.siswaData[kelas].length;
+                            // Cek apakah ada perubahan lokal yang belum disinkron
+                            const hasUnsyncedChanges = localStorage.getItem('siswaDataNeedsSync') === 'true';
+                            
+                            if (hasUnsyncedChanges) {
+                                console.log('⚠️ Local changes detected, prioritizing local data');
+                                // Jika ada perubahan lokal yang belum disinkron, jangan timpa dengan data server
+                                console.log('📤 Sending local changes to server instead...');
+                                
+                                // Kirim data lokal ke server
+                                setTimeout(() => {
+                                    syncSiswaDataToServer();
+                                }, 1000);
+                                
+                                dataLoaded = true;
+                            } else if (!localModified || (serverSiswaModified && serverSiswaModified > localModified)) {
+                                console.log('🔄 Updating siswa data from server (server is newer)');
+                                
+                                let siswaUpdated = false;
+                                let updateDetails = [];
+                                
+                                Object.keys(serverData.siswaData).forEach(kelas => {
+                                    if (serverData.siswaData[kelas] && Array.isArray(serverData.siswaData[kelas])) {
+                                        // Cek apakah ada perubahan
+                                        const currentData = JSON.stringify(siswaData[kelas] || []);
+                                        const serverDataStr = JSON.stringify(serverData.siswaData[kelas]);
                                         
-                                        siswaData[kelas] = serverData.siswaData[kelas];
-                                        siswaUpdated = true;
-                                        updateDetails.push(`Kelas ${kelas}: ${oldCount} → ${newCount} siswa`);
-                                        
-                                        console.log(`🔄 Kelas ${kelas} diperbarui: ${oldCount} → ${newCount} siswa`);
+                                        if (currentData !== serverDataStr) {
+                                            const oldCount = siswaData[kelas] ? siswaData[kelas].length : 0;
+                                            const newCount = serverData.siswaData[kelas].length;
+                                            
+                                            siswaData[kelas] = serverData.siswaData[kelas];
+                                            siswaUpdated = true;
+                                            updateDetails.push(`Kelas ${kelas}: ${oldCount} → ${newCount} siswa`);
+                                            
+                                            console.log(`🔄 Kelas ${kelas} diperbarui: ${oldCount} → ${newCount} siswa`);
+                                        }
                                     }
+                                });
+                                
+                                if (siswaUpdated) {
+                                    localStorage.setItem('siswaData', JSON.stringify(siswaData));
+                                    localStorage.setItem('siswaDataLastModified', serverSiswaModified || new Date().toISOString());
+                                    localStorage.removeItem('siswaDataNeedsSync'); // Clear sync flag
+                                    console.log('✅ Data siswa diperbarui dari server:', updateDetails.join(', '));
+                                    
+                                    // Broadcast perubahan ke semua tab/window
+                                    broadcastDataChange('siswaData', siswaData);
+                                    
+                                    // Refresh tampilan yang relevan
+                                    refreshSiswaViews();
+                                    
+                                    // Tampilkan notifikasi
+                                    showSyncNotification('🔄 Data siswa diperbarui dari server');
+                                } else {
+                                    console.log('ℹ️ Data siswa sudah terbaru');
                                 }
-                            });
-                            
-                            if (siswaUpdated) {
-                                localStorage.setItem('siswaData', JSON.stringify(siswaData));
-                                localStorage.setItem('siswaDataLastModified', new Date().toISOString());
-                                console.log('✅ Data siswa diperbarui dari server:', updateDetails.join(', '));
                                 
-                                // Broadcast perubahan ke semua tab/window
-                                broadcastDataChange('siswaData', siswaData);
-                                
-                                // Refresh tampilan yang relevan
-                                refreshSiswaViews();
-                                
-                                // Tampilkan notifikasi
-                                showSyncNotification('🔄 Data siswa diperbarui dari server');
+                                dataLoaded = true;
                             } else {
-                                console.log('ℹ️ Data siswa sudah terbaru');
+                                console.log('ℹ️ Local siswa data is newer or same, keeping local changes');
+                                dataLoaded = true;
                             }
-                            
-                            dataLoaded = true;
                         }
                     } else {
                         console.log('⚠️ Data server kosong atau format tidak valid');
@@ -2828,8 +2881,11 @@
         // Fungsi untuk menyimpan data siswa ke localStorage
         function saveSiswaData() {
             try {
+                const timestamp = new Date().toISOString();
                 localStorage.setItem('siswaData', JSON.stringify(siswaData));
-                console.log('Data siswa berhasil disimpan ke localStorage');
+                localStorage.setItem('siswaDataLastModified', timestamp);
+                localStorage.setItem('siswaDataNeedsSync', 'true');
+                console.log('Data siswa berhasil disimpan ke localStorage dengan timestamp:', timestamp);
                 
                 // Sinkronkan perubahan data siswa ke Google Sheets
                 syncSiswaDataToServer();
@@ -2841,10 +2897,12 @@
 
         // Fungsi untuk sinkronisasi data siswa ke server
         function syncSiswaDataToServer() {
+            const timestamp = new Date().toISOString();
             const siswaUpdateData = {
                 action: 'updateSiswaData',
                 siswaData: siswaData,
-                timestamp: new Date().toISOString(),
+                timestamp: timestamp,
+                siswaDataLastModified: localStorage.getItem('siswaDataLastModified') || timestamp,
                 syncId: Date.now() + '_' + Math.random().toString(36).substr(2, 9)
             };
 
@@ -2854,11 +2912,6 @@
             loadingMsg.className = 'fixed top-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg z-50 shadow-lg';
             loadingMsg.textContent = '🔄 Menyinkronkan data siswa...';
             document.body.appendChild(loadingMsg);
-
-            // Simpan data ke localStorage dengan flag perubahan
-            localStorage.setItem('siswaData', JSON.stringify(siswaData));
-            localStorage.setItem('siswaDataLastModified', new Date().toISOString());
-            localStorage.setItem('siswaDataNeedsSync', 'true');
 
             fetch(API_URL, {
                 method: 'POST',
@@ -2877,9 +2930,9 @@
                 
                 showSyncNotification('✅ Data siswa tersinkron ke Google Sheets');
                 
-                // Simpan timestamp sinkronisasi terakhir
-                localStorage.setItem('lastSiswaSync', new Date().toISOString());
-                localStorage.setItem('siswaDataNeedsSync', 'false');
+                // Clear sync flag dan update timestamp setelah berhasil
+                localStorage.removeItem('siswaDataNeedsSync');
+                localStorage.setItem('lastSiswaSync', timestamp);
                 
                 // Broadcast perubahan ke semua tab/window
                 broadcastDataChange('siswaData', siswaData);
@@ -2953,7 +3006,7 @@
             });
         }
 
-        // Fungsi untuk mengambil data siswa terbaru dari server
+        // Fungsi untuk mengambil data siswa terbaru dari server dengan conflict resolution
         function loadLatestStudentData() {
             const loadingMsg = document.createElement('div');
             loadingMsg.id = 'loadStudentLoadingMsg';
@@ -2962,6 +3015,28 @@
             document.body.appendChild(loadingMsg);
             
             console.log('📥 Mengambil data siswa terbaru dari server...');
+            
+            // Cek apakah ada perubahan lokal yang belum disinkron
+            const hasUnsyncedChanges = localStorage.getItem('siswaDataNeedsSync') === 'true';
+            
+            if (hasUnsyncedChanges) {
+                if (loadingMsg) {
+                    loadingMsg.remove();
+                }
+                
+                const choice = confirm('⚠️ KONFLIK DATA TERDETEKSI\n\nAda perubahan data siswa di perangkat ini yang belum disinkron ke server.\n\nPilihan:\n• OK = Kirim data lokal ke server (timpa data server)\n• Cancel = Ambil data dari server (timpa data lokal)\n\nApa yang ingin Anda lakukan?');
+                
+                if (choice) {
+                    // User pilih kirim data lokal ke server
+                    console.log('👤 User memilih untuk mengirim data lokal ke server');
+                    syncStudentDataManually();
+                    return;
+                } else {
+                    // User pilih ambil data dari server
+                    console.log('👤 User memilih untuk mengambil data dari server');
+                    localStorage.removeItem('siswaDataNeedsSync'); // Clear flag untuk memaksa update
+                }
+            }
             
             fetch(API_URL + '?action=getSystemData&t=' + Date.now())
             .then(response => {
@@ -2997,8 +3072,11 @@
                     });
                     
                     if (hasChanges) {
+                        const timestamp = serverData.timestamp || serverData.siswaDataLastModified || new Date().toISOString();
                         localStorage.setItem('siswaData', JSON.stringify(siswaData));
-                        console.log('✅ Data siswa diperbarui dari server');
+                        localStorage.setItem('siswaDataLastModified', timestamp);
+                        localStorage.removeItem('siswaDataNeedsSync'); // Clear sync flag
+                        console.log('✅ Data siswa diperbarui dari server dengan timestamp:', timestamp);
                         
                         // Refresh tampilan
                         showManageData();
@@ -3874,5 +3952,5 @@
             }, 2000);
         });
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968d6819d49c8446',t:'MTc1NDEzNTk0MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968d837a30314a46',t:'MTc1NDEzNzA2Mi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
