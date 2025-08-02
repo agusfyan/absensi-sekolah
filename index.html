@@ -543,7 +543,7 @@
                             📥 Perbarui Data Siswa
                         </button>
                         <div id="syncIndicator${kelas}" class="text-xs text-gray-500 mt-1">
-                            <span id="syncStatus${kelas}">Siap untuk sinkronisasi</span>
+                            <span id="syncStatus${kelas}">🔄 Auto-sync aktif (setiap 15 detik)</span>
                         </div>
                     </div>
 
@@ -832,7 +832,7 @@
             }
         }
 
-        // Fungsi untuk refresh data siswa untuk guru
+        // Fungsi untuk refresh data siswa untuk guru dengan force sync
         function refreshStudentData(kelas) {
             // Update status indicator
             const statusElement = document.getElementById(`syncStatus${kelas}`);
@@ -853,8 +853,12 @@
             const today = new Date().toISOString().split('T')[0];
             const currentAttendance = JSON.parse(localStorage.getItem(`attendance_${today}`) || '{}');
             
-            // Ambil data terbaru dari server
-            loadSystemDataFromServer().then(success => {
+            // FORCE SYNC: Hapus flag sync untuk memaksa ambil data dari server
+            localStorage.removeItem('siswaDataNeedsSync');
+            localStorage.removeItem('lastSiswaSync');
+            
+            // Ambil data terbaru dari server dengan force refresh
+            forceLoadSystemDataFromServer().then(success => {
                 if (loadingMsg) {
                     loadingMsg.remove();
                 }
@@ -881,17 +885,18 @@
                     }
                     
                     // Tampilkan notifikasi sukses
-                    showSyncNotification('✅ Data siswa berhasil diperbarui!');
+                    showSyncNotification('✅ Data siswa berhasil diperbarui dari server!');
                     
                     // Update status
                     setTimeout(() => {
                         updateStatusMessage('Data siswa telah diperbarui dari server');
                     }, 500);
                     
-                    // Tampilkan dialog konfirmasi
+                    // Tampilkan dialog konfirmasi dengan detail perubahan
                     setTimeout(() => {
                         const siswaCount = siswaData[kelas] ? siswaData[kelas].length : 0;
-                        alert(`✅ DATA SISWA DIPERBARUI!\n\n📊 Kelas ${kelas}: ${siswaCount} siswa\n🔄 Data terbaru telah dimuat dari Google Sheets\n📝 Data absensi yang sudah diinput hari ini tetap tersimpan\n\n💡 Sekarang Anda dapat melihat perubahan data siswa yang dilakukan dari perangkat lain.`);
+                        const lastUpdate = new Date().toLocaleString('id-ID');
+                        alert(`✅ DATA SISWA DIPERBARUI!\n\n📊 Kelas ${kelas}: ${siswaCount} siswa\n🔄 Data terbaru dari Google Sheets\n⏰ Diperbarui: ${lastUpdate}\n📝 Data absensi hari ini tetap tersimpan\n\n💡 Semua perubahan dari operator sekolah sudah dimuat!`);
                     }, 1000);
                 } else {
                     // Update status indicator untuk error
@@ -2180,6 +2185,155 @@
                 })
                 .catch(error => {
                     console.error('❌ Gagal memuat data sistem dari server:', error.message);
+                    resolve(false);
+                });
+            });
+        }
+
+        // Fungsi untuk FORCE LOAD data dari server (mengabaikan timestamp lokal)
+        function forceLoadSystemDataFromServer() {
+            return new Promise((resolve) => {
+                console.log('🔥 FORCE SYNC: Mengambil data terbaru dari Google Sheets...');
+                
+                // Coba dengan multiple methods untuk memastikan kompatibilitas
+                const tryFetch = () => {
+                    return fetch(API_URL + '?action=getSystemData&force=true&t=' + Date.now(), {
+                        method: 'GET',
+                        cache: 'no-cache',
+                        headers: {
+                            'Cache-Control': 'no-cache, no-store, must-revalidate',
+                            'Pragma': 'no-cache',
+                            'Expires': '0'
+                        }
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+                        return response.json();
+                    });
+                };
+                
+                const tryJSONP = () => {
+                    return new Promise((resolveJSONP, rejectJSONP) => {
+                        const script = document.createElement('script');
+                        const callbackName = 'forceSystemDataCallback' + Date.now();
+                        
+                        window[callbackName] = function(data) {
+                            document.head.removeChild(script);
+                            delete window[callbackName];
+                            resolveJSONP(data);
+                        };
+                        
+                        script.onerror = () => {
+                            document.head.removeChild(script);
+                            delete window[callbackName];
+                            rejectJSONP(new Error('JSONP failed'));
+                        };
+                        
+                        script.src = API_URL + '?action=getSystemData&force=true&callback=' + callbackName + '&t=' + Date.now();
+                        document.head.appendChild(script);
+                        
+                        // Timeout after 15 seconds for force sync
+                        setTimeout(() => {
+                            if (window[callbackName]) {
+                                document.head.removeChild(script);
+                                delete window[callbackName];
+                                rejectJSONP(new Error('JSONP timeout'));
+                            }
+                        }, 15000);
+                    });
+                };
+                
+                // Try fetch first, then JSONP as fallback
+                tryFetch()
+                .catch(error => {
+                    console.log('Force fetch failed, trying JSONP...', error.message);
+                    return tryJSONP();
+                })
+                .then(serverData => {
+                    let dataLoaded = false;
+                    
+                    if (serverData && typeof serverData === 'object') {
+                        console.log('🔥 FORCE SYNC: Data diterima dari server:', Object.keys(serverData));
+                        
+                        // FORCE UPDATE userData (mengabaikan timestamp)
+                        if (serverData.userData) {
+                            console.log('🔥 FORCE UPDATE: Updating user data from server');
+                            
+                            const mergedUserData = { ...userData };
+                            
+                            // Update admin data jika ada
+                            if (serverData.userData.admin) {
+                                mergedUserData.admin = { ...mergedUserData.admin, ...serverData.userData.admin };
+                            }
+                            
+                            // Update guru data jika ada
+                            if (serverData.userData.guru) {
+                                mergedUserData.guru = { ...mergedUserData.guru, ...serverData.userData.guru };
+                            }
+                            
+                            // Update wali kelas data jika ada
+                            if (serverData.userData.waliKelas) {
+                                mergedUserData.waliKelas = { ...mergedUserData.waliKelas, ...serverData.userData.waliKelas };
+                            }
+                            
+                            userData = mergedUserData;
+                            const serverUserModified = serverData.timestamp || serverData.userDataLastModified || new Date().toISOString();
+                            localStorage.setItem('userData', JSON.stringify(userData));
+                            localStorage.setItem('userDataLastModified', serverUserModified);
+                            console.log('✅ FORCE UPDATE: Data user dimuat dari server');
+                            dataLoaded = true;
+                        }
+                        
+                        // FORCE UPDATE siswaData (mengabaikan timestamp dan local changes)
+                        if (serverData.siswaData) {
+                            console.log('🔥 FORCE UPDATE: Updating siswa data from server');
+                            
+                            let siswaUpdated = false;
+                            let updateDetails = [];
+                            
+                            Object.keys(serverData.siswaData).forEach(kelas => {
+                                if (serverData.siswaData[kelas] && Array.isArray(serverData.siswaData[kelas])) {
+                                    // FORCE UPDATE: Selalu update tanpa cek perubahan
+                                    const oldCount = siswaData[kelas] ? siswaData[kelas].length : 0;
+                                    const newCount = serverData.siswaData[kelas].length;
+                                    
+                                    siswaData[kelas] = serverData.siswaData[kelas];
+                                    siswaUpdated = true;
+                                    updateDetails.push(`Kelas ${kelas}: ${oldCount} → ${newCount} siswa`);
+                                    
+                                    console.log(`🔥 FORCE UPDATE Kelas ${kelas}: ${oldCount} → ${newCount} siswa`);
+                                }
+                            });
+                            
+                            if (siswaUpdated) {
+                                const serverSiswaModified = serverData.timestamp || serverData.siswaDataLastModified || new Date().toISOString();
+                                localStorage.setItem('siswaData', JSON.stringify(siswaData));
+                                localStorage.setItem('siswaDataLastModified', serverSiswaModified);
+                                localStorage.removeItem('siswaDataNeedsSync'); // Clear sync flag
+                                console.log('✅ FORCE UPDATE: Data siswa diperbarui dari server:', updateDetails.join(', '));
+                                
+                                // Broadcast perubahan ke semua tab/window
+                                broadcastDataChange('siswaData', siswaData);
+                                
+                                // Refresh tampilan yang relevan
+                                refreshSiswaViews();
+                                
+                                // Tampilkan notifikasi
+                                showSyncNotification('🔥 Data siswa di-force update dari server!');
+                            }
+                            
+                            dataLoaded = true;
+                        }
+                    } else {
+                        console.log('⚠️ FORCE SYNC: Data server kosong atau format tidak valid');
+                    }
+                    
+                    resolve(dataLoaded);
+                })
+                .catch(error => {
+                    console.error('❌ FORCE SYNC: Gagal memuat data sistem dari server:', error.message);
                     resolve(false);
                 });
             });
@@ -3924,14 +4078,48 @@
             // Mulai auto-sync
             startAutoSync();
             
-            // Auto-sync data sistem setiap 30 detik (sangat sering untuk sinkronisasi real-time)
+            // Auto-sync data sistem setiap 15 detik untuk guru (real-time sync)
             setInterval(() => {
-                loadSystemDataFromServer().then(success => {
-                    if (success) {
-                        console.log('🔄 Auto-sync completed');
-                    }
-                });
-            }, 30000); // 30 detik
+                // Jika sedang login sebagai guru, lakukan force sync lebih sering
+                if (currentRole === 'guru') {
+                    forceLoadSystemDataFromServer().then(success => {
+                        if (success) {
+                            console.log('🔄 Auto force-sync completed for teacher');
+                            
+                            // Auto-refresh form absensi guru jika sedang aktif
+                            if (document.getElementById('guruContent') && 
+                                document.getElementById('guruContent').innerHTML.includes('Absensi Kelas')) {
+                                const kelasMatch = document.getElementById('guruContent').innerHTML.match(/Absensi Kelas (\d+)/);
+                                if (kelasMatch) {
+                                    const kelas = kelasMatch[1];
+                                    console.log(`🔄 Auto-refreshing teacher form for class ${kelas}`);
+                                    
+                                    // Simpan data absensi yang sudah diinput hari ini
+                                    const today = new Date().toISOString().split('T')[0];
+                                    const currentAttendance = JSON.parse(localStorage.getItem(`attendance_${today}`) || '{}');
+                                    
+                                    // Refresh form dengan data terbaru
+                                    setTimeout(() => {
+                                        showAbsensiFormGuru(kelas);
+                                        
+                                        // Restore data absensi yang sudah diinput
+                                        setTimeout(() => {
+                                            restoreTodayAttendance(kelas);
+                                        }, 200);
+                                    }, 500);
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    // Untuk admin dan guest, gunakan sync normal
+                    loadSystemDataFromServer().then(success => {
+                        if (success) {
+                            console.log('🔄 Auto-sync completed');
+                        }
+                    });
+                }
+            }, 15000); // 15 detik untuk sync yang lebih cepat
             
             // Backup data setiap 5 menit
             setInterval(backupDataToMultipleStorage, 300000);
@@ -3952,5 +4140,5 @@
             }, 2000);
         });
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968d837a30314a46',t:'MTc1NDEzNzA2Mi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968d9611058a8276',t:'MTc1NDEzNzgyMy4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
