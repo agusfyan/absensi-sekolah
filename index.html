@@ -542,6 +542,9 @@
                         <button onclick="refreshStudentData(${kelas})" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm border-2 border-blue-400">
                             📥 Perbarui Data Siswa
                         </button>
+                        <div id="syncIndicator${kelas}" class="text-xs text-gray-500 mt-1">
+                            <span id="syncStatus${kelas}">Siap untuk sinkronisasi</span>
+                        </div>
                     </div>
 
                     <div class="overflow-x-auto">
@@ -831,6 +834,13 @@
 
         // Fungsi untuk refresh data siswa untuk guru
         function refreshStudentData(kelas) {
+            // Update status indicator
+            const statusElement = document.getElementById(`syncStatus${kelas}`);
+            if (statusElement) {
+                statusElement.textContent = '🔄 Memperbarui data...';
+                statusElement.className = 'text-blue-600 font-medium';
+            }
+            
             const loadingMsg = document.createElement('div');
             loadingMsg.id = 'refreshLoadingMsg';
             loadingMsg.className = 'fixed top-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg z-50 shadow-lg';
@@ -838,6 +848,10 @@
             document.body.appendChild(loadingMsg);
             
             console.log(`🔄 Guru meminta refresh data siswa kelas ${kelas}`);
+            
+            // Simpan data absensi yang sudah diinput hari ini
+            const today = new Date().toISOString().split('T')[0];
+            const currentAttendance = JSON.parse(localStorage.getItem(`attendance_${today}`) || '{}');
             
             // Ambil data terbaru dari server
             loadSystemDataFromServer().then(success => {
@@ -848,6 +862,23 @@
                 if (success) {
                     // Refresh tampilan form absensi dengan data terbaru
                     showAbsensiFormGuru(kelas);
+                    
+                    // Restore data absensi yang sudah diinput
+                    setTimeout(() => {
+                        restoreTodayAttendance(kelas);
+                    }, 200);
+                    
+                    // Update status indicator
+                    if (statusElement) {
+                        statusElement.textContent = `✅ Diperbarui ${new Date().toLocaleTimeString('id-ID', {hour: '2-digit', minute: '2-digit'})}`;
+                        statusElement.className = 'text-green-600 font-medium';
+                        
+                        // Reset status setelah 5 detik
+                        setTimeout(() => {
+                            statusElement.textContent = 'Siap untuk sinkronisasi';
+                            statusElement.className = 'text-gray-500';
+                        }, 5000);
+                    }
                     
                     // Tampilkan notifikasi sukses
                     showSyncNotification('✅ Data siswa berhasil diperbarui!');
@@ -860,15 +891,33 @@
                     // Tampilkan dialog konfirmasi
                     setTimeout(() => {
                         const siswaCount = siswaData[kelas] ? siswaData[kelas].length : 0;
-                        alert(`✅ DATA SISWA DIPERBARUI!\n\n📊 Kelas ${kelas}: ${siswaCount} siswa\n🔄 Data terbaru telah dimuat dari Google Sheets\n\n💡 Sekarang Anda dapat melihat perubahan data siswa yang dilakukan dari perangkat lain.`);
+                        alert(`✅ DATA SISWA DIPERBARUI!\n\n📊 Kelas ${kelas}: ${siswaCount} siswa\n🔄 Data terbaru telah dimuat dari Google Sheets\n📝 Data absensi yang sudah diinput hari ini tetap tersimpan\n\n💡 Sekarang Anda dapat melihat perubahan data siswa yang dilakukan dari perangkat lain.`);
                     }, 1000);
                 } else {
+                    // Update status indicator untuk error
+                    if (statusElement) {
+                        statusElement.textContent = '❌ Gagal terhubung ke server';
+                        statusElement.className = 'text-red-600 font-medium';
+                        
+                        // Reset status setelah 5 detik
+                        setTimeout(() => {
+                            statusElement.textContent = 'Siap untuk sinkronisasi';
+                            statusElement.className = 'text-gray-500';
+                        }, 5000);
+                    }
+                    
                     // Jika gagal ambil dari server, tetap refresh dengan data lokal
                     showAbsensiFormGuru(kelas);
+                    
+                    // Restore data absensi yang sudah diinput
+                    setTimeout(() => {
+                        restoreTodayAttendance(kelas);
+                    }, 200);
+                    
                     showSyncNotification('⚠️ Menggunakan data lokal - tidak dapat terhubung ke server');
                     
                     setTimeout(() => {
-                        alert('⚠️ TIDAK DAPAT TERHUBUNG KE SERVER\n\n📱 Menampilkan data siswa yang tersimpan di perangkat ini\n🌐 Pastikan koneksi internet stabil untuk mendapat data terbaru\n\n💡 Coba lagi dalam beberapa saat atau hubungi operator sekolah.');
+                        alert('⚠️ TIDAK DAPAT TERHUBUNG KE SERVER\n\n📱 Menampilkan data siswa yang tersimpan di perangkat ini\n🌐 Pastikan koneksi internet stabil untuk mendapat data terbaru\n📝 Data absensi yang sudah diinput hari ini tetap tersimpan\n\n💡 Coba lagi dalam beberapa saat atau hubungi operator sekolah.');
                     }, 1000);
                 }
             });
@@ -2053,29 +2102,17 @@
                             
                             if (siswaUpdated) {
                                 localStorage.setItem('siswaData', JSON.stringify(siswaData));
+                                localStorage.setItem('siswaDataLastModified', new Date().toISOString());
                                 console.log('✅ Data siswa diperbarui dari server:', updateDetails.join(', '));
                                 
-                                // Refresh tampilan jika sedang di kelola data
-                                if (document.getElementById('adminContent') && 
-                                    document.getElementById('adminContent').innerHTML.includes('Kelola Data Siswa')) {
-                                    setTimeout(() => {
-                                        showManageData();
-                                        showSyncNotification('🔄 Data siswa diperbarui dari server');
-                                    }, 500);
-                                }
+                                // Broadcast perubahan ke semua tab/window
+                                broadcastDataChange('siswaData', siswaData);
                                 
-                                // Refresh form guru jika sedang aktif
-                                if (document.getElementById('guruContent') && 
-                                    document.getElementById('guruContent').innerHTML.includes('Absensi Kelas')) {
-                                    const kelasMatch = document.getElementById('guruContent').innerHTML.match(/Absensi Kelas (\d+)/);
-                                    if (kelasMatch) {
-                                        const kelas = kelasMatch[1];
-                                        setTimeout(() => {
-                                            showAbsensiFormGuru(kelas);
-                                            showSyncNotification('🔄 Data siswa kelas diperbarui dari server');
-                                        }, 500);
-                                    }
-                                }
+                                // Refresh tampilan yang relevan
+                                refreshSiswaViews();
+                                
+                                // Tampilkan notifikasi
+                                showSyncNotification('🔄 Data siswa diperbarui dari server');
                             } else {
                                 console.log('ℹ️ Data siswa sudah terbaru');
                             }
@@ -2807,7 +2844,8 @@
             const siswaUpdateData = {
                 action: 'updateSiswaData',
                 siswaData: siswaData,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                syncId: Date.now() + '_' + Math.random().toString(36).substr(2, 9)
             };
 
             // Tampilkan loading indicator
@@ -2816,6 +2854,11 @@
             loadingMsg.className = 'fixed top-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg z-50 shadow-lg';
             loadingMsg.textContent = '🔄 Menyinkronkan data siswa...';
             document.body.appendChild(loadingMsg);
+
+            // Simpan data ke localStorage dengan flag perubahan
+            localStorage.setItem('siswaData', JSON.stringify(siswaData));
+            localStorage.setItem('siswaDataLastModified', new Date().toISOString());
+            localStorage.setItem('siswaDataNeedsSync', 'true');
 
             fetch(API_URL, {
                 method: 'POST',
@@ -2836,11 +2879,13 @@
                 
                 // Simpan timestamp sinkronisasi terakhir
                 localStorage.setItem('lastSiswaSync', new Date().toISOString());
+                localStorage.setItem('siswaDataNeedsSync', 'false');
                 
-                // Broadcast perubahan ke tab lain di browser yang sama
-                if (typeof(Storage) !== "undefined" && window.localStorage) {
-                    localStorage.setItem('siswaDataChanged', Date.now().toString());
-                }
+                // Broadcast perubahan ke semua tab/window
+                broadcastDataChange('siswaData', siswaData);
+                
+                // Trigger notifikasi untuk perangkat lain
+                triggerCrossDeviceNotification();
             })
             .catch(error => {
                 console.error('❌ Gagal sinkron data siswa:', error);
@@ -2850,6 +2895,9 @@
                 }
                 
                 showSyncNotification('⚠️ Gagal sinkron data siswa ke server');
+                
+                // Tetap broadcast ke tab lokal meskipun gagal ke server
+                broadcastDataChange('siswaData', siswaData);
             });
         }
 
@@ -3568,44 +3616,167 @@
             }
         }
 
+        // Fungsi untuk broadcast perubahan data
+        function broadcastDataChange(dataType, data) {
+            const changeInfo = {
+                type: dataType,
+                timestamp: new Date().toISOString(),
+                data: data,
+                changeId: Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+            };
+            
+            // Broadcast ke localStorage untuk tab lain
+            localStorage.setItem('dataChangeNotification', JSON.stringify(changeInfo));
+            
+            // Broadcast ke BroadcastChannel jika didukung
+            if (typeof BroadcastChannel !== 'undefined') {
+                const channel = new BroadcastChannel('siswaDataChannel');
+                channel.postMessage(changeInfo);
+            }
+            
+            console.log(`📡 Broadcasting ${dataType} change:`, changeInfo.changeId);
+        }
+
+        // Fungsi untuk trigger notifikasi antar perangkat
+        function triggerCrossDeviceNotification() {
+            // Simpan flag untuk polling yang lebih agresif
+            localStorage.setItem('recentDataChange', new Date().toISOString());
+            
+            // Kirim ping ke server untuk membantu sinkronisasi
+            const pingData = {
+                action: 'ping',
+                timestamp: new Date().toISOString(),
+                message: 'Data siswa updated'
+            };
+            
+            fetch(API_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(pingData)
+            }).catch(error => {
+                console.log('Ping failed, but that\'s okay:', error.message);
+            });
+        }
+
         // Fungsi untuk memantau perubahan data siswa dari perangkat lain
         function startDataChangeMonitoring() {
             // Monitor perubahan localStorage dari tab/window lain
             window.addEventListener('storage', function(e) {
-                if (e.key === 'siswaDataChanged') {
-                    console.log('🔄 Terdeteksi perubahan data siswa dari perangkat lain');
-                    
-                    // Reload data siswa dari localStorage
-                    loadSiswaData();
-                    
-                    // Refresh tampilan jika sedang di kelola data
-                    if (document.getElementById('adminContent') && 
-                        document.getElementById('adminContent').innerHTML.includes('Kelola Data Siswa')) {
-                        setTimeout(() => {
-                            showManageData();
-                            showSyncNotification('🔄 Data siswa diperbarui dari perangkat lain');
-                        }, 500);
-                    }
-                    
-                    // Refresh form absensi guru jika sedang aktif
-                    if (document.getElementById('guruContent') && 
-                        document.getElementById('guruContent').innerHTML.includes('Absensi Kelas')) {
-                        const kelasMatch = document.getElementById('guruContent').innerHTML.match(/Absensi Kelas (\d+)/);
-                        if (kelasMatch) {
-                            const kelas = kelasMatch[1];
-                            setTimeout(() => {
-                                showAbsensiFormGuru(kelas);
-                                showSyncNotification('🔄 Data siswa kelas diperbarui');
-                            }, 500);
+                if (e.key === 'dataChangeNotification') {
+                    try {
+                        const changeInfo = JSON.parse(e.newValue);
+                        if (changeInfo.type === 'siswaData') {
+                            console.log('🔄 Terdeteksi perubahan data siswa dari tab lain:', changeInfo.changeId);
+                            handleSiswaDataChange(changeInfo.data);
                         }
+                    } catch (error) {
+                        console.error('Error parsing change notification:', error);
                     }
+                }
+                
+                if (e.key === 'siswaDataChanged') {
+                    console.log('🔄 Terdeteksi perubahan data siswa (legacy)');
+                    loadSiswaData();
+                    refreshSiswaViews();
                 }
             });
             
-            // Polling data dari server setiap 2 menit untuk memastikan sinkronisasi
+            // Monitor BroadcastChannel jika didukung
+            if (typeof BroadcastChannel !== 'undefined') {
+                const channel = new BroadcastChannel('siswaDataChannel');
+                channel.onmessage = function(event) {
+                    const changeInfo = event.data;
+                    if (changeInfo.type === 'siswaData') {
+                        console.log('📻 Received broadcast:', changeInfo.changeId);
+                        handleSiswaDataChange(changeInfo.data);
+                    }
+                };
+            }
+            
+            // Polling agresif untuk perubahan terbaru (setiap 10 detik)
+            setInterval(() => {
+                checkForRecentChanges();
+            }, 10000);
+            
+            // Polling normal dari server setiap 1 menit
             setInterval(() => {
                 checkForServerUpdates();
-            }, 120000); // 2 menit
+            }, 60000);
+        }
+
+        // Fungsi untuk handle perubahan data siswa
+        function handleSiswaDataChange(newData) {
+            // Update data siswa global
+            Object.keys(newData).forEach(kelas => {
+                siswaData[kelas] = newData[kelas];
+            });
+            
+            // Simpan ke localStorage
+            localStorage.setItem('siswaData', JSON.stringify(siswaData));
+            
+            // Refresh tampilan
+            refreshSiswaViews();
+            
+            // Tampilkan notifikasi
+            showSyncNotification('🔄 Data siswa diperbarui dari perangkat lain');
+        }
+
+        // Fungsi untuk refresh tampilan yang berkaitan dengan data siswa
+        function refreshSiswaViews() {
+            // Refresh tampilan kelola data admin
+            if (document.getElementById('adminContent') && 
+                document.getElementById('adminContent').innerHTML.includes('Kelola Data Siswa')) {
+                setTimeout(() => {
+                    showManageData();
+                }, 500);
+            }
+            
+            // Refresh form absensi guru
+            if (document.getElementById('guruContent') && 
+                document.getElementById('guruContent').innerHTML.includes('Absensi Kelas')) {
+                const kelasMatch = document.getElementById('guruContent').innerHTML.match(/Absensi Kelas (\d+)/);
+                if (kelasMatch) {
+                    const kelas = kelasMatch[1];
+                    setTimeout(() => {
+                        showAbsensiFormGuru(kelas);
+                    }, 500);
+                }
+            }
+            
+            // Refresh form absensi admin
+            if (document.getElementById('adminContent') && 
+                document.getElementById('adminContent').innerHTML.includes('Input Absensi Siswa')) {
+                setTimeout(() => {
+                    showAbsensiForm();
+                }, 500);
+            }
+        }
+
+        // Fungsi untuk cek perubahan terbaru
+        function checkForRecentChanges() {
+            const recentChange = localStorage.getItem('recentDataChange');
+            const lastCheck = localStorage.getItem('lastChangeCheck') || '0';
+            
+            if (recentChange && recentChange > lastCheck) {
+                console.log('🔍 Checking for recent changes...');
+                
+                // Update timestamp check
+                localStorage.setItem('lastChangeCheck', new Date().toISOString());
+                
+                // Cek apakah ada perubahan yang perlu disinkron
+                const needsSync = localStorage.getItem('siswaDataNeedsSync');
+                if (needsSync !== 'true') {
+                    // Ambil data terbaru dari server
+                    loadSystemDataFromServer().then(success => {
+                        if (success) {
+                            console.log('✅ Data terbaru dimuat dari server');
+                        }
+                    });
+                }
+            }
         }
 
         // Fungsi untuk mengecek update dari server
@@ -3675,14 +3846,14 @@
             // Mulai auto-sync
             startAutoSync();
             
-            // Auto-sync data sistem setiap 3 menit (lebih sering untuk sinkronisasi data siswa)
+            // Auto-sync data sistem setiap 30 detik (sangat sering untuk sinkronisasi real-time)
             setInterval(() => {
                 loadSystemDataFromServer().then(success => {
                     if (success) {
-                        localStorage.setItem('siswaDataChanged', Date.now().toString());
+                        console.log('🔄 Auto-sync completed');
                     }
                 });
-            }, 180000); // 3 menit
+            }, 30000); // 30 detik
             
             // Backup data setiap 5 menit
             setInterval(backupDataToMultipleStorage, 300000);
@@ -3703,5 +3874,5 @@
             }, 2000);
         });
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968cf70184a50728',t:'MTc1NDEzMTMwOC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968d6819d49c8446',t:'MTc1NDEzNTk0MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
