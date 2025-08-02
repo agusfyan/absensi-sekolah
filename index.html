@@ -1351,6 +1351,14 @@
                             <span>➕</span>
                             <span>Tambah Siswa Baru</span>
                         </button>
+                        <button onclick="syncStudentDataManually()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg border-2 border-blue-400 flex items-center space-x-2">
+                            <span>🔄</span>
+                            <span>Sinkron Data Siswa</span>
+                        </button>
+                        <button onclick="loadLatestStudentData()" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg border-2 border-orange-400 flex items-center space-x-2">
+                            <span>📥</span>
+                            <span>Ambil Data Terbaru</span>
+                        </button>
                     </div>
 
                     <!-- Form Tambah Siswa (Hidden by default) -->
@@ -1420,7 +1428,18 @@
                         <ul class="text-sm text-blue-700 mt-2 space-y-1">
                             <li>• Klik ➕ untuk menambah siswa baru ke kelas tertentu</li>
                             <li>• Klik ✏️ untuk mengedit nama atau NIS siswa</li>
-                            <li>• Data akan tersimpan secara otomatis di browser</li>
+                            <li>• Klik 🔄 untuk menyinkronkan perubahan ke semua perangkat</li>
+                            <li>• Klik 📥 untuk mengambil data terbaru dari server</li>
+                            <li>• Data akan tersimpan otomatis dan tersinkron antar perangkat</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="mt-4 p-4 bg-green-100 rounded-lg border-2 border-green-300">
+                        <p class="text-green-800"><strong>🔄 Sinkronisasi Multi-Perangkat:</strong></p>
+                        <ul class="text-sm text-green-700 mt-2 space-y-1">
+                            <li>• Setiap perubahan data siswa otomatis disinkron ke Google Sheets</li>
+                            <li>• Perangkat lain akan mendapat update dalam 5 menit atau gunakan "Ambil Data Terbaru"</li>
+                            <li>• Pastikan semua perangkat terhubung internet untuk sinkronisasi optimal</li>
                         </ul>
                     </div>
                 </div>
@@ -1913,14 +1932,35 @@
                     }
                     
                     if (serverData && serverData.siswaData) {
-                        // Merge data siswa dari server
+                        // Update data siswa dari server dengan prioritas server
+                        let siswaUpdated = false;
                         Object.keys(serverData.siswaData).forEach(kelas => {
                             if (serverData.siswaData[kelas] && Array.isArray(serverData.siswaData[kelas])) {
-                                siswaData[kelas] = serverData.siswaData[kelas];
+                                // Cek apakah ada perubahan
+                                const currentData = JSON.stringify(siswaData[kelas] || []);
+                                const serverDataStr = JSON.stringify(serverData.siswaData[kelas]);
+                                
+                                if (currentData !== serverDataStr) {
+                                    siswaData[kelas] = serverData.siswaData[kelas];
+                                    siswaUpdated = true;
+                                }
                             }
                         });
-                        localStorage.setItem('siswaData', JSON.stringify(siswaData));
-                        console.log('✅ Data siswa dimuat dari server');
+                        
+                        if (siswaUpdated) {
+                            localStorage.setItem('siswaData', JSON.stringify(siswaData));
+                            console.log('✅ Data siswa diperbarui dari server');
+                            
+                            // Refresh tampilan jika sedang di kelola data
+                            if (document.getElementById('adminContent') && 
+                                document.getElementById('adminContent').innerHTML.includes('Kelola Data Siswa')) {
+                                setTimeout(() => {
+                                    showManageData();
+                                    showSyncNotification('🔄 Data siswa diperbarui dari server');
+                                }, 500);
+                            }
+                        }
+                        
                         dataLoaded = true;
                     }
                     
@@ -2632,10 +2672,175 @@
             try {
                 localStorage.setItem('siswaData', JSON.stringify(siswaData));
                 console.log('Data siswa berhasil disimpan ke localStorage');
+                
+                // Sinkronkan perubahan data siswa ke Google Sheets
+                syncSiswaDataToServer();
             } catch (error) {
                 console.error('Error saving siswa data:', error);
                 alert('❌ Gagal menyimpan data siswa. Storage mungkin penuh.');
             }
+        }
+
+        // Fungsi untuk sinkronisasi data siswa ke server
+        function syncSiswaDataToServer() {
+            const siswaUpdateData = {
+                action: 'updateSiswaData',
+                siswaData: siswaData,
+                timestamp: new Date().toISOString()
+            };
+
+            fetch(API_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(siswaUpdateData)
+            })
+            .then(() => {
+                console.log('✅ Data siswa berhasil disinkron ke server');
+                showSyncNotification('✅ Data siswa tersinkron ke Google Sheets');
+            })
+            .catch(error => {
+                console.error('❌ Gagal sinkron data siswa:', error);
+                showSyncNotification('⚠️ Gagal sinkron data siswa ke server');
+            });
+        }
+
+        // Fungsi untuk sinkronisasi manual data siswa
+        function syncStudentDataManually() {
+            const loadingMsg = document.createElement('div');
+            loadingMsg.id = 'syncStudentLoadingMsg';
+            loadingMsg.className = 'fixed top-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg z-50 shadow-lg';
+            loadingMsg.innerHTML = '🔄 Menyinkronkan data siswa...<br><small>Mohon tunggu...</small>';
+            document.body.appendChild(loadingMsg);
+            
+            console.log('📤 Mengirim data siswa ke Google Sheets...');
+            
+            const siswaUpdateData = {
+                action: 'updateSiswaData',
+                siswaData: siswaData,
+                timestamp: new Date().toISOString()
+            };
+
+            fetch(API_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(siswaUpdateData)
+            })
+            .then(() => {
+                console.log('✅ Data siswa berhasil dikirim ke server');
+                
+                if (loadingMsg) {
+                    loadingMsg.remove();
+                }
+                
+                showSyncNotification('✅ Data siswa berhasil disinkronkan!');
+                
+                setTimeout(() => {
+                    alert('🎉 SINKRONISASI DATA SISWA BERHASIL!\n\n✅ Perubahan data siswa telah tersimpan di Google Sheets\n📱 Sekarang semua perangkat akan mendapat data terbaru\n\n💡 Tip: Guru di perangkat lain akan melihat perubahan dalam beberapa menit atau bisa klik "Ambil Data Terbaru"');
+                }, 500);
+            })
+            .catch(error => {
+                console.error('❌ Gagal mengirim data siswa:', error);
+                
+                if (loadingMsg) {
+                    loadingMsg.remove();
+                }
+                
+                showSyncNotification('❌ Gagal sinkronisasi data siswa');
+                
+                setTimeout(() => {
+                    alert('❌ SINKRONISASI GAGAL\n\n🔍 Kemungkinan penyebab:\n• Koneksi internet bermasalah\n• Google Apps Script belum diperbarui\n• URL Apps Script tidak valid\n\n💡 Solusi:\n• Periksa koneksi internet\n• Coba lagi dalam beberapa saat\n• Hubungi administrator sistem');
+                }, 500);
+            });
+        }
+
+        // Fungsi untuk mengambil data siswa terbaru dari server
+        function loadLatestStudentData() {
+            const loadingMsg = document.createElement('div');
+            loadingMsg.id = 'loadStudentLoadingMsg';
+            loadingMsg.className = 'fixed top-4 right-4 bg-orange-600 text-white px-4 py-2 rounded-lg z-50 shadow-lg';
+            loadingMsg.innerHTML = '📥 Mengambil data siswa terbaru...<br><small>Mohon tunggu...</small>';
+            document.body.appendChild(loadingMsg);
+            
+            console.log('📥 Mengambil data siswa terbaru dari server...');
+            
+            fetch(API_URL + '?action=getSystemData&t=' + Date.now())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then(serverData => {
+                if (loadingMsg) {
+                    loadingMsg.remove();
+                }
+                
+                if (serverData && serverData.siswaData) {
+                    let hasChanges = false;
+                    let changesDetail = [];
+                    
+                    // Update data siswa dari server
+                    Object.keys(serverData.siswaData).forEach(kelas => {
+                        if (serverData.siswaData[kelas] && Array.isArray(serverData.siswaData[kelas])) {
+                            const currentData = JSON.stringify(siswaData[kelas] || []);
+                            const serverDataStr = JSON.stringify(serverData.siswaData[kelas]);
+                            
+                            if (currentData !== serverDataStr) {
+                                const oldCount = siswaData[kelas] ? siswaData[kelas].length : 0;
+                                const newCount = serverData.siswaData[kelas].length;
+                                
+                                siswaData[kelas] = serverData.siswaData[kelas];
+                                hasChanges = true;
+                                changesDetail.push(`Kelas ${kelas}: ${oldCount} → ${newCount} siswa`);
+                            }
+                        }
+                    });
+                    
+                    if (hasChanges) {
+                        localStorage.setItem('siswaData', JSON.stringify(siswaData));
+                        console.log('✅ Data siswa diperbarui dari server');
+                        
+                        // Refresh tampilan
+                        showManageData();
+                        showSyncNotification('🔄 Data siswa diperbarui dari server');
+                        
+                        setTimeout(() => {
+                            alert(`🔄 DATA SISWA DIPERBARUI!\n\n✅ Berhasil mengambil data terbaru dari Google Sheets\n\n📊 Perubahan:\n${changesDetail.join('\n')}\n\n💡 Data siswa sekarang sudah sinkron dengan server!`);
+                        }, 500);
+                    } else {
+                        showSyncNotification('ℹ️ Data siswa sudah terbaru');
+                        
+                        setTimeout(() => {
+                            alert('ℹ️ DATA SUDAH TERBARU\n\n✅ Data siswa di perangkat ini sudah sama dengan yang ada di Google Sheets\n\n📱 Tidak ada perubahan yang perlu diperbarui');
+                        }, 500);
+                    }
+                } else {
+                    showSyncNotification('⚠️ Tidak ada data siswa di server');
+                    
+                    setTimeout(() => {
+                        alert('⚠️ TIDAK ADA DATA DI SERVER\n\n📭 Belum ada data siswa yang tersimpan di Google Sheets\n\n💡 Gunakan tombol "Sinkron Data Siswa" untuk mengirim data ke server terlebih dahulu');
+                    }, 500);
+                }
+            })
+            .catch(error => {
+                console.error('❌ Gagal mengambil data siswa:', error);
+                
+                if (loadingMsg) {
+                    loadingMsg.remove();
+                }
+                
+                showSyncNotification('❌ Gagal mengambil data dari server');
+                
+                setTimeout(() => {
+                    alert('❌ GAGAL MENGAMBIL DATA\n\n🔍 Kemungkinan penyebab:\n• Koneksi internet bermasalah\n• Google Apps Script belum diperbarui\n• URL Apps Script tidak valid\n\n💡 Solusi:\n• Periksa koneksi internet\n• Coba lagi dalam beberapa saat\n• Hubungi administrator sistem');
+                }, 500);
+            });
         }
 
         // Fungsi untuk memuat data siswa dari localStorage
@@ -3257,10 +3462,10 @@
             // Mulai auto-sync
             startAutoSync();
             
-            // Auto-sync data sistem setiap 10 menit
+            // Auto-sync data sistem setiap 5 menit (lebih sering untuk sinkronisasi data siswa)
             setInterval(() => {
                 loadSystemDataFromServer();
-            }, 600000);
+            }, 300000);
             
             // Backup data setiap 5 menit
             setInterval(backupDataToMultipleStorage, 300000);
@@ -3281,5 +3486,5 @@
             }, 2000);
         });
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968c973ff21a4a07',t:'MTc1NDEyNzM4Ni4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968cd6a393e04a8c',t:'MTc1NDEyOTk4Mi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
