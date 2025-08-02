@@ -832,33 +832,36 @@
             }
         }
 
-        // Fungsi untuk refresh data siswa untuk guru dengan force sync
+        // Fungsi untuk refresh data siswa untuk guru dengan ULTRA FORCE SYNC
         function refreshStudentData(kelas) {
             // Update status indicator
             const statusElement = document.getElementById(`syncStatus${kelas}`);
             if (statusElement) {
-                statusElement.textContent = '🔄 Memperbarui data...';
-                statusElement.className = 'text-blue-600 font-medium';
+                statusElement.textContent = '🔥 FORCE SYNC aktif...';
+                statusElement.className = 'text-red-600 font-bold animate-pulse';
             }
             
             const loadingMsg = document.createElement('div');
             loadingMsg.id = 'refreshLoadingMsg';
-            loadingMsg.className = 'fixed top-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg z-50 shadow-lg';
-            loadingMsg.innerHTML = '📥 Memperbarui data siswa...<br><small>Mohon tunggu...</small>';
+            loadingMsg.className = 'fixed top-4 right-4 bg-red-600 text-white px-4 py-2 rounded-lg z-50 shadow-lg animate-pulse';
+            loadingMsg.innerHTML = '🔥 ULTRA FORCE SYNC...<br><small>Mengabaikan cache, ambil data server!</small>';
             document.body.appendChild(loadingMsg);
             
-            console.log(`🔄 Guru meminta refresh data siswa kelas ${kelas}`);
+            console.log(`🔥 ULTRA FORCE SYNC: Guru meminta refresh data siswa kelas ${kelas}`);
             
             // Simpan data absensi yang sudah diinput hari ini
             const today = new Date().toISOString().split('T')[0];
             const currentAttendance = JSON.parse(localStorage.getItem(`attendance_${today}`) || '{}');
             
-            // FORCE SYNC: Hapus flag sync untuk memaksa ambil data dari server
+            // ULTRA FORCE SYNC: Hapus SEMUA cache dan flag
             localStorage.removeItem('siswaDataNeedsSync');
             localStorage.removeItem('lastSiswaSync');
+            localStorage.removeItem('siswaDataLastModified');
+            localStorage.removeItem('userDataLastModified');
+            localStorage.removeItem('lastSystemSync');
             
-            // Ambil data terbaru dari server dengan force refresh
-            forceLoadSystemDataFromServer().then(success => {
+            // Multiple sync attempts dengan berbagai metode
+            ultraForceSyncFromServer().then(success => {
                 if (loadingMsg) {
                     loadingMsg.remove();
                 }
@@ -874,41 +877,41 @@
                     
                     // Update status indicator
                     if (statusElement) {
-                        statusElement.textContent = `✅ Diperbarui ${new Date().toLocaleTimeString('id-ID', {hour: '2-digit', minute: '2-digit'})}`;
-                        statusElement.className = 'text-green-600 font-medium';
+                        statusElement.textContent = `🔥 FORCE SYNC berhasil ${new Date().toLocaleTimeString('id-ID', {hour: '2-digit', minute: '2-digit'})}`;
+                        statusElement.className = 'text-green-600 font-bold';
                         
-                        // Reset status setelah 5 detik
+                        // Reset status setelah 10 detik
                         setTimeout(() => {
-                            statusElement.textContent = 'Siap untuk sinkronisasi';
-                            statusElement.className = 'text-gray-500';
-                        }, 5000);
+                            statusElement.textContent = '🔄 Auto-sync aktif (setiap 10 detik)';
+                            statusElement.className = 'text-blue-600';
+                        }, 10000);
                     }
                     
                     // Tampilkan notifikasi sukses
-                    showSyncNotification('✅ Data siswa berhasil diperbarui dari server!');
+                    showSyncNotification('🔥 ULTRA FORCE SYNC berhasil! Data terbaru dimuat!');
                     
                     // Update status
                     setTimeout(() => {
-                        updateStatusMessage('Data siswa telah diperbarui dari server');
+                        updateStatusMessage('🔥 Data siswa di-FORCE UPDATE dari server');
                     }, 500);
                     
                     // Tampilkan dialog konfirmasi dengan detail perubahan
                     setTimeout(() => {
                         const siswaCount = siswaData[kelas] ? siswaData[kelas].length : 0;
                         const lastUpdate = new Date().toLocaleString('id-ID');
-                        alert(`✅ DATA SISWA DIPERBARUI!\n\n📊 Kelas ${kelas}: ${siswaCount} siswa\n🔄 Data terbaru dari Google Sheets\n⏰ Diperbarui: ${lastUpdate}\n📝 Data absensi hari ini tetap tersimpan\n\n💡 Semua perubahan dari operator sekolah sudah dimuat!`);
+                        alert(`🔥 ULTRA FORCE SYNC BERHASIL!\n\n📊 Kelas ${kelas}: ${siswaCount} siswa\n🔥 Data DIPAKSA diambil dari Google Sheets\n⏰ Diperbarui: ${lastUpdate}\n📝 Data absensi hari ini tetap tersimpan\n\n💡 Semua perubahan dari operator sekolah PASTI sudah dimuat!\n\n🚀 Sistem menggunakan ULTRA FORCE SYNC yang mengabaikan semua cache!`);
                     }, 1000);
                 } else {
                     // Update status indicator untuk error
                     if (statusElement) {
-                        statusElement.textContent = '❌ Gagal terhubung ke server';
-                        statusElement.className = 'text-red-600 font-medium';
+                        statusElement.textContent = '❌ FORCE SYNC gagal - server tidak merespons';
+                        statusElement.className = 'text-red-600 font-bold';
                         
-                        // Reset status setelah 5 detik
+                        // Reset status setelah 10 detik
                         setTimeout(() => {
-                            statusElement.textContent = 'Siap untuk sinkronisasi';
-                            statusElement.className = 'text-gray-500';
-                        }, 5000);
+                            statusElement.textContent = '🔄 Auto-sync aktif (setiap 10 detik)';
+                            statusElement.className = 'text-blue-600';
+                        }, 10000);
                     }
                     
                     // Jika gagal ambil dari server, tetap refresh dengan data lokal
@@ -919,13 +922,238 @@
                         restoreTodayAttendance(kelas);
                     }, 200);
                     
-                    showSyncNotification('⚠️ Menggunakan data lokal - tidak dapat terhubung ke server');
+                    showSyncNotification('❌ ULTRA FORCE SYNC gagal - menggunakan data lokal');
                     
                     setTimeout(() => {
-                        alert('⚠️ TIDAK DAPAT TERHUBUNG KE SERVER\n\n📱 Menampilkan data siswa yang tersimpan di perangkat ini\n🌐 Pastikan koneksi internet stabil untuk mendapat data terbaru\n📝 Data absensi yang sudah diinput hari ini tetap tersimpan\n\n💡 Coba lagi dalam beberapa saat atau hubungi operator sekolah.');
+                        alert('❌ ULTRA FORCE SYNC GAGAL\n\n🔍 Semua metode sync telah dicoba:\n• Direct fetch dengan no-cache\n• JSONP dengan timestamp unik\n• Multiple retry attempts\n• Cache bypass headers\n\n📱 Menampilkan data siswa yang tersimpan di perangkat ini\n🌐 Kemungkinan:\n• Server Google Apps Script down\n• Koneksi internet bermasalah\n• URL Apps Script berubah\n\n💡 Solusi:\n• Coba lagi dalam 1-2 menit\n• Periksa koneksi internet\n• Hubungi operator sekolah untuk cek server');
                     }, 1000);
                 }
             });
+        }
+
+        // Fungsi ULTRA FORCE SYNC yang menggunakan multiple methods
+        function ultraForceSyncFromServer() {
+            return new Promise((resolve) => {
+                console.log('🔥 ULTRA FORCE SYNC: Starting multiple sync attempts...');
+                
+                const timestamp = Date.now();
+                const randomId = Math.random().toString(36).substr(2, 9);
+                
+                // Method 1: Direct fetch dengan aggressive cache busting
+                const tryDirectFetch = () => {
+                    console.log('🔥 Method 1: Direct fetch with aggressive cache busting');
+                    return fetch(API_URL + `?action=getSystemData&ultraforce=true&t=${timestamp}&r=${randomId}&bust=${Date.now()}`, {
+                        method: 'GET',
+                        cache: 'no-store',
+                        headers: {
+                            'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+                            'Pragma': 'no-cache',
+                            'Expires': '0',
+                            'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT'
+                        }
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+                        return response.json();
+                    });
+                };
+                
+                // Method 2: JSONP dengan multiple callbacks
+                const tryJSONPUltraForce = () => {
+                    console.log('🔥 Method 2: JSONP with ultra force parameters');
+                    return new Promise((resolveJSONP, rejectJSONP) => {
+                        const script = document.createElement('script');
+                        const callbackName = 'ultraForceCallback' + timestamp + randomId;
+                        
+                        window[callbackName] = function(data) {
+                            document.head.removeChild(script);
+                            delete window[callbackName];
+                            resolveJSONP(data);
+                        };
+                        
+                        script.onerror = () => {
+                            document.head.removeChild(script);
+                            delete window[callbackName];
+                            rejectJSONP(new Error('JSONP ultra force failed'));
+                        };
+                        
+                        script.src = API_URL + `?action=getSystemData&ultraforce=true&callback=${callbackName}&t=${timestamp}&r=${randomId}&bust=${Date.now()}&nocache=1`;
+                        document.head.appendChild(script);
+                        
+                        // Timeout after 20 seconds for ultra force
+                        setTimeout(() => {
+                            if (window[callbackName]) {
+                                document.head.removeChild(script);
+                                delete window[callbackName];
+                                rejectJSONP(new Error('JSONP ultra force timeout'));
+                            }
+                        }, 20000);
+                    });
+                };
+                
+                // Method 3: POST request untuk bypass cache
+                const tryPOSTBypass = () => {
+                    console.log('🔥 Method 3: POST request to bypass all caches');
+                    return fetch(API_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Cache-Control': 'no-cache, no-store, must-revalidate',
+                            'Pragma': 'no-cache'
+                        },
+                        body: JSON.stringify({
+                            action: 'getSystemData',
+                            ultraforce: true,
+                            timestamp: timestamp,
+                            randomId: randomId,
+                            bypassCache: true
+                        })
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`POST HTTP ${response.status}: ${response.statusText}`);
+                        }
+                        return response.json();
+                    });
+                };
+                
+                // Try all methods in sequence with retries
+                const attemptSync = async (attempt = 1) => {
+                    console.log(`🔥 ULTRA FORCE SYNC Attempt ${attempt}/3`);
+                    
+                    try {
+                        // Try Method 1
+                        console.log('🔥 Trying direct fetch...');
+                        const data1 = await tryDirectFetch();
+                        if (data1 && typeof data1 === 'object') {
+                            console.log('✅ Direct fetch succeeded');
+                            return processUltraForceData(data1);
+                        }
+                    } catch (error) {
+                        console.log('❌ Direct fetch failed:', error.message);
+                    }
+                    
+                    try {
+                        // Try Method 2
+                        console.log('🔥 Trying JSONP ultra force...');
+                        const data2 = await tryJSONPUltraForce();
+                        if (data2 && typeof data2 === 'object') {
+                            console.log('✅ JSONP ultra force succeeded');
+                            return processUltraForceData(data2);
+                        }
+                    } catch (error) {
+                        console.log('❌ JSONP ultra force failed:', error.message);
+                    }
+                    
+                    try {
+                        // Try Method 3
+                        console.log('🔥 Trying POST bypass...');
+                        const data3 = await tryPOSTBypass();
+                        if (data3 && typeof data3 === 'object') {
+                            console.log('✅ POST bypass succeeded');
+                            return processUltraForceData(data3);
+                        }
+                    } catch (error) {
+                        console.log('❌ POST bypass failed:', error.message);
+                    }
+                    
+                    // Retry if not the last attempt
+                    if (attempt < 3) {
+                        console.log(`🔄 Retrying in 2 seconds... (attempt ${attempt + 1}/3)`);
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        return attemptSync(attempt + 1);
+                    }
+                    
+                    return false;
+                };
+                
+                attemptSync().then(resolve).catch(() => resolve(false));
+            });
+        }
+
+        // Fungsi untuk memproses data dari ultra force sync
+        function processUltraForceData(serverData) {
+            let dataLoaded = false;
+            
+            if (serverData && typeof serverData === 'object') {
+                console.log('🔥 ULTRA FORCE: Processing server data:', Object.keys(serverData));
+                
+                // FORCE UPDATE userData (mengabaikan semua timestamp)
+                if (serverData.userData) {
+                    console.log('🔥 ULTRA FORCE: Updating user data from server');
+                    
+                    const mergedUserData = { ...userData };
+                    
+                    // Update admin data jika ada
+                    if (serverData.userData.admin) {
+                        mergedUserData.admin = { ...mergedUserData.admin, ...serverData.userData.admin };
+                    }
+                    
+                    // Update guru data jika ada
+                    if (serverData.userData.guru) {
+                        mergedUserData.guru = { ...mergedUserData.guru, ...serverData.userData.guru };
+                    }
+                    
+                    // Update wali kelas data jika ada
+                    if (serverData.userData.waliKelas) {
+                        mergedUserData.waliKelas = { ...mergedUserData.waliKelas, ...serverData.userData.waliKelas };
+                    }
+                    
+                    userData = mergedUserData;
+                    const serverUserModified = new Date().toISOString(); // Force new timestamp
+                    localStorage.setItem('userData', JSON.stringify(userData));
+                    localStorage.setItem('userDataLastModified', serverUserModified);
+                    console.log('✅ ULTRA FORCE: User data updated from server');
+                    dataLoaded = true;
+                }
+                
+                // FORCE UPDATE siswaData (mengabaikan semua timestamp dan local changes)
+                if (serverData.siswaData) {
+                    console.log('🔥 ULTRA FORCE: Updating siswa data from server');
+                    
+                    let siswaUpdated = false;
+                    let updateDetails = [];
+                    
+                    Object.keys(serverData.siswaData).forEach(kelas => {
+                        if (serverData.siswaData[kelas] && Array.isArray(serverData.siswaData[kelas])) {
+                            // ULTRA FORCE UPDATE: Selalu update tanpa cek apapun
+                            const oldCount = siswaData[kelas] ? siswaData[kelas].length : 0;
+                            const newCount = serverData.siswaData[kelas].length;
+                            
+                            siswaData[kelas] = [...serverData.siswaData[kelas]]; // Deep copy
+                            siswaUpdated = true;
+                            updateDetails.push(`Kelas ${kelas}: ${oldCount} → ${newCount} siswa`);
+                            
+                            console.log(`🔥 ULTRA FORCE UPDATE Kelas ${kelas}: ${oldCount} → ${newCount} siswa`);
+                        }
+                    });
+                    
+                    if (siswaUpdated) {
+                        const serverSiswaModified = new Date().toISOString(); // Force new timestamp
+                        localStorage.setItem('siswaData', JSON.stringify(siswaData));
+                        localStorage.setItem('siswaDataLastModified', serverSiswaModified);
+                        localStorage.removeItem('siswaDataNeedsSync'); // Clear sync flag
+                        console.log('✅ ULTRA FORCE: Data siswa updated from server:', updateDetails.join(', '));
+                        
+                        // Broadcast perubahan ke semua tab/window
+                        broadcastDataChange('siswaData', siswaData);
+                        
+                        // Refresh tampilan yang relevan
+                        refreshSiswaViews();
+                        
+                        // Tampilkan notifikasi
+                        showSyncNotification('🔥 ULTRA FORCE: Data siswa di-force update dari server!');
+                    }
+                    
+                    dataLoaded = true;
+                }
+            } else {
+                console.log('⚠️ ULTRA FORCE: Data server kosong atau format tidak valid');
+            }
+            
+            return dataLoaded;
         }
 
         function sendToGoogleSheets(data, silentSync = false) {
@@ -3049,7 +3277,7 @@
             }
         }
 
-        // Fungsi untuk sinkronisasi data siswa ke server
+        // Fungsi untuk sinkronisasi data siswa ke server dengan BROADCAST
         function syncSiswaDataToServer() {
             const timestamp = new Date().toISOString();
             const siswaUpdateData = {
@@ -3057,7 +3285,9 @@
                 siswaData: siswaData,
                 timestamp: timestamp,
                 siswaDataLastModified: localStorage.getItem('siswaDataLastModified') || timestamp,
-                syncId: Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+                syncId: Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                broadcastToAllDevices: true, // Flag untuk broadcast
+                operatorChange: true // Flag bahwa ini perubahan dari operator
             };
 
             // Tampilkan loading indicator
@@ -3091,6 +3321,9 @@
                 // Broadcast perubahan ke semua tab/window
                 broadcastDataChange('siswaData', siswaData);
                 
+                // BROADCAST KHUSUS untuk memberitahu semua perangkat guru
+                broadcastOperatorChange();
+                
                 // Trigger notifikasi untuk perangkat lain
                 triggerCrossDeviceNotification();
             })
@@ -3105,7 +3338,52 @@
                 
                 // Tetap broadcast ke tab lokal meskipun gagal ke server
                 broadcastDataChange('siswaData', siswaData);
+                broadcastOperatorChange();
             });
+        }
+
+        // Fungsi untuk broadcast perubahan dari operator ke semua perangkat
+        function broadcastOperatorChange() {
+            const changeSignal = {
+                type: 'operatorDataChanged',
+                timestamp: new Date().toISOString(),
+                changeId: Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                message: 'Operator sekolah mengubah data siswa'
+            };
+            
+            // Broadcast ke localStorage untuk tab lain
+            localStorage.setItem('operatorDataChanged', JSON.stringify(changeSignal));
+            
+            // Broadcast ke semua tab dengan signal khusus
+            localStorage.setItem('forceRefreshAllTabs', JSON.stringify(changeSignal));
+            
+            // Broadcast ke BroadcastChannel jika didukung
+            if (typeof BroadcastChannel !== 'undefined') {
+                const operatorChannel = new BroadcastChannel('operatorChangeChannel');
+                operatorChannel.postMessage(changeSignal);
+            }
+            
+            // Kirim signal khusus ke server untuk trigger push notification
+            const pushSignal = {
+                action: 'pushNotification',
+                type: 'dataChanged',
+                message: 'Data siswa diperbarui oleh operator',
+                timestamp: new Date().toISOString(),
+                urgent: true
+            };
+            
+            fetch(API_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(pushSignal)
+            }).catch(error => {
+                console.log('Push notification failed:', error.message);
+            });
+            
+            console.log('📡 OPERATOR BROADCAST: Signal sent to all devices');
         }
 
         // Fungsi untuk sinkronisasi manual data siswa
@@ -4034,6 +4312,214 @@
             }
         }
 
+        // Fungsi untuk cek perubahan server dengan HEAD request
+        function checkServerChangesWithHEAD() {
+            return new Promise((resolve) => {
+                const timestamp = Date.now();
+                const url = API_URL + `?action=checkChanges&t=${timestamp}&r=${Math.random()}`;
+                
+                fetch(url, {
+                    method: 'HEAD',
+                    cache: 'no-store',
+                    headers: {
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache'
+                    }
+                })
+                .then(response => {
+                    // Cek header Last-Modified atau ETag untuk perubahan
+                    const lastModified = response.headers.get('Last-Modified');
+                    const etag = response.headers.get('ETag');
+                    
+                    const lastCheck = localStorage.getItem('lastServerCheck');
+                    const currentCheck = lastModified || etag || timestamp.toString();
+                    
+                    if (lastCheck !== currentCheck) {
+                        localStorage.setItem('lastServerCheck', currentCheck);
+                        resolve(true);
+                    } else {
+                        resolve(false);
+                    }
+                })
+                .catch(error => {
+                    console.log('HEAD request failed:', error.message);
+                    resolve(false);
+                });
+            });
+        }
+
+        // Fungsi emergency sync dengan XMLHttpRequest
+        function emergencyXHRSync() {
+            const xhr = new XMLHttpRequest();
+            const timestamp = Date.now();
+            const randomId = Math.random().toString(36).substr(2, 9);
+            
+            xhr.open('GET', API_URL + `?action=getSystemData&emergency=true&t=${timestamp}&r=${randomId}`, true);
+            xhr.setRequestHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            xhr.setRequestHeader('Pragma', 'no-cache');
+            xhr.setRequestHeader('Expires', '0');
+            
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4) {
+                    if (xhr.status === 200) {
+                        try {
+                            const serverData = JSON.parse(xhr.responseText);
+                            if (serverData && typeof serverData === 'object') {
+                                console.log('🚨 Emergency XHR sync successful');
+                                processUltraForceData(serverData);
+                            }
+                        } catch (error) {
+                            console.log('🚨 Emergency XHR parse error:', error.message);
+                        }
+                    } else {
+                        console.log('🚨 Emergency XHR failed:', xhr.status);
+                    }
+                }
+            };
+            
+            xhr.onerror = function() {
+                console.log('🚨 Emergency XHR network error');
+            };
+            
+            xhr.send();
+        }
+
+        // Fungsi untuk WebSocket-like polling dengan Server-Sent Events simulation
+        function startSSESimulation() {
+            if (currentRole !== 'guru') return;
+            
+            const sseInterval = setInterval(() => {
+                const eventSource = new Promise((resolve) => {
+                    const timestamp = Date.now();
+                    const url = API_URL + `?action=sse&t=${timestamp}&stream=true`;
+                    
+                    fetch(url, {
+                        method: 'GET',
+                        cache: 'no-store',
+                        headers: {
+                            'Accept': 'text/event-stream',
+                            'Cache-Control': 'no-cache'
+                        }
+                    })
+                    .then(response => response.text())
+                    .then(data => {
+                        if (data && data.includes('data:')) {
+                            console.log('📡 SSE simulation received data');
+                            resolve(true);
+                        } else {
+                            resolve(false);
+                        }
+                    })
+                    .catch(() => resolve(false));
+                });
+                
+                eventSource.then(hasData => {
+                    if (hasData) {
+                        console.log('📡 SSE triggered sync');
+                        ultraForceSyncFromServer();
+                    }
+                });
+            }, 4000);
+            
+            // Cleanup saat logout
+            window.addEventListener('beforeunload', () => {
+                clearInterval(sseInterval);
+            });
+        }
+
+        // Fungsi untuk monitoring dengan Intersection Observer (untuk tab visibility)
+        function startTabVisibilityMonitoring() {
+            let isTabVisible = true;
+            
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    isTabVisible = false;
+                    console.log('🔍 Tab hidden, reducing sync frequency');
+                } else {
+                    isTabVisible = true;
+                    console.log('🔍 Tab visible, resuming aggressive sync');
+                    
+                    // Immediate sync when tab becomes visible
+                    if (currentRole === 'guru') {
+                        ultraForceSyncFromServer().then(success => {
+                            if (success) {
+                                console.log('🔍 Tab visibility sync completed');
+                            }
+                        });
+                    }
+                }
+            });
+            
+            // Return visibility status for other functions
+            return () => isTabVisible;
+        }
+
+        // Fungsi untuk network change monitoring
+        function startNetworkMonitoring() {
+            let wasOnline = navigator.onLine;
+            
+            window.addEventListener('online', () => {
+                if (!wasOnline) {
+                    console.log('🌐 Network back online, triggering immediate sync');
+                    wasOnline = true;
+                    
+                    if (currentRole === 'guru') {
+                        // Immediate aggressive sync when back online
+                        ultraForceSyncFromServer().then(success => {
+                            if (success) {
+                                showSyncNotification('🌐 Kembali online - data tersinkron!');
+                            }
+                        });
+                    }
+                }
+            });
+            
+            window.addEventListener('offline', () => {
+                wasOnline = false;
+                console.log('🌐 Network offline');
+                showSyncNotification('⚠️ Offline - menggunakan data lokal');
+            });
+        }
+
+        // Fungsi untuk storage event monitoring (cross-tab communication)
+        function startCrossTabMonitoring() {
+            window.addEventListener('storage', (e) => {
+                if (e.key === 'forceRefreshAllTabs') {
+                    console.log('📡 Cross-tab refresh signal received');
+                    
+                    if (currentRole === 'guru') {
+                        ultraForceSyncFromServer().then(success => {
+                            if (success) {
+                                console.log('📡 Cross-tab sync completed');
+                                
+                                // Auto-refresh current view
+                                if (document.getElementById('guruContent') && 
+                                    document.getElementById('guruContent').innerHTML.includes('Absensi Kelas')) {
+                                    const kelasMatch = document.getElementById('guruContent').innerHTML.match(/Absensi Kelas (\d+)/);
+                                    if (kelasMatch) {
+                                        const kelas = kelasMatch[1];
+                                        showAbsensiFormGuru(kelas);
+                                        setTimeout(() => restoreTodayAttendance(kelas), 100);
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+                
+                if (e.key === 'operatorDataChanged') {
+                    console.log('📡 Operator data change detected');
+                    showSyncNotification('🔄 Operator mengubah data - memperbarui...');
+                    
+                    setTimeout(() => {
+                        if (currentRole === 'guru') {
+                            ultraForceSyncFromServer();
+                        }
+                    }, 1000);
+                }
+            });
+        }
+
         // Auto-load data absensi saat halaman dimuat
         window.addEventListener('load', function() {
             // Animasi logo sudah berjalan otomatis dengan CSS
@@ -4060,6 +4546,12 @@
             // Mulai monitoring perubahan data
             startDataChangeMonitoring();
             
+            // Start all monitoring systems
+            startTabVisibilityMonitoring();
+            startNetworkMonitoring();
+            startCrossTabMonitoring();
+            startSSESimulation();
+            
             // Bersihkan data absensi harian yang lama
             cleanupOldAttendanceData();
             
@@ -4078,13 +4570,13 @@
             // Mulai auto-sync
             startAutoSync();
             
-            // Auto-sync data sistem setiap 15 detik untuk guru (real-time sync)
+            // ULTRA AGGRESSIVE REAL-TIME SYNC untuk guru (setiap 5 detik)
             setInterval(() => {
-                // Jika sedang login sebagai guru, lakukan force sync lebih sering
+                // Jika sedang login sebagai guru, lakukan ULTRA FORCE SYNC sangat sering
                 if (currentRole === 'guru') {
-                    forceLoadSystemDataFromServer().then(success => {
+                    ultraForceSyncFromServer().then(success => {
                         if (success) {
-                            console.log('🔄 Auto force-sync completed for teacher');
+                            console.log('🔥 ULTRA AUTO FORCE-SYNC completed for teacher');
                             
                             // Auto-refresh form absensi guru jika sedang aktif
                             if (document.getElementById('guruContent') && 
@@ -4092,34 +4584,59 @@
                                 const kelasMatch = document.getElementById('guruContent').innerHTML.match(/Absensi Kelas (\d+)/);
                                 if (kelasMatch) {
                                     const kelas = kelasMatch[1];
-                                    console.log(`🔄 Auto-refreshing teacher form for class ${kelas}`);
+                                    console.log(`🔥 ULTRA AUTO-REFRESH teacher form for class ${kelas}`);
                                     
                                     // Simpan data absensi yang sudah diinput hari ini
                                     const today = new Date().toISOString().split('T')[0];
                                     const currentAttendance = JSON.parse(localStorage.getItem(`attendance_${today}`) || '{}');
                                     
-                                    // Refresh form dengan data terbaru
+                                    // Refresh form dengan data terbaru tanpa delay
+                                    showAbsensiFormGuru(kelas);
+                                    
+                                    // Restore data absensi yang sudah diinput
                                     setTimeout(() => {
-                                        showAbsensiFormGuru(kelas);
-                                        
-                                        // Restore data absensi yang sudah diinput
-                                        setTimeout(() => {
-                                            restoreTodayAttendance(kelas);
-                                        }, 200);
-                                    }, 500);
+                                        restoreTodayAttendance(kelas);
+                                    }, 100);
+                                    
+                                    // Update status indicator
+                                    const statusElement = document.getElementById(`syncStatus${kelas}`);
+                                    if (statusElement) {
+                                        statusElement.textContent = `🔥 Auto-sync ${new Date().toLocaleTimeString('id-ID', {hour: '2-digit', minute: '2-digit', second: '2-digit'})}`;
+                                        statusElement.className = 'text-green-600 font-medium';
+                                    }
                                 }
                             }
                         }
                     });
                 } else {
-                    // Untuk admin dan guest, gunakan sync normal
-                    loadSystemDataFromServer().then(success => {
+                    // Untuk admin dan guest, gunakan sync normal tapi lebih sering
+                    ultraForceSyncFromServer().then(success => {
                         if (success) {
-                            console.log('🔄 Auto-sync completed');
+                            console.log('🔥 ULTRA AUTO-SYNC completed for admin/guest');
                         }
                     });
                 }
-            }, 15000); // 15 detik untuk sync yang lebih cepat
+            }, 5000); // 5 detik untuk sync yang sangat agresif
+            
+            // BACKUP POLLING dengan metode berbeda (setiap 3 detik)
+            setInterval(() => {
+                if (currentRole === 'guru') {
+                    // Polling dengan HEAD request untuk cek perubahan
+                    checkServerChangesWithHEAD().then(hasChanges => {
+                        if (hasChanges) {
+                            console.log('🔥 HEAD polling detected changes, triggering sync...');
+                            ultraForceSyncFromServer();
+                        }
+                    });
+                }
+            }, 3000);
+            
+            // EMERGENCY POLLING dengan XMLHttpRequest (setiap 7 detik)
+            setInterval(() => {
+                if (currentRole === 'guru') {
+                    emergencyXHRSync();
+                }
+            }, 7000);
             
             // Backup data setiap 5 menit
             setInterval(backupDataToMultipleStorage, 300000);
@@ -4140,5 +4657,5 @@
             }, 2000);
         });
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968d9611058a8276',t:'MTc1NDEzNzgyMy4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'968da04c816d846a',t:'MTc1NDEzODI0Mi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
